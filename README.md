@@ -105,7 +105,6 @@ to the **JGI IMG/M** annotation pipeline.
 | BBMap (removehuman) | 38.92 | Host contamination removal |
 | Bowtie2 | 2.5.1 | Read alignment |
 | HTSeq | 2.0.2 | Read counting |
-| MetaPhlAn4 | 4.0.6 | Taxonomic profiling |
 
 ---
 

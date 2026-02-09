@@ -17,7 +17,9 @@ The bioinformatic pipeline consisted of the following major steps:
 3. Metagenome assembly and taxonomic classification  
 4. Genome binning, dereplication, and replication rate estimation  
 5. Metatranscriptome decontamination and read mapping  
-6. Functional and taxonomic annotation  
+6. Functional and taxonomic annotation
+
+The majority of tools were installed in a Conda environment.
 
 ---
 

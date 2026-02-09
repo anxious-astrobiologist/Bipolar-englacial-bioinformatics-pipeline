@@ -21,94 +21,213 @@ The bioinformatic pipeline consisted of the following major steps:
 
 ---
 
-## Read preprocessing
+1. Read Quality Control and Trimming
+Tool: FastQC v.0.12.1
+Forward and reverse reads were first checked with FastQC.
 
-Low-quality bases, reads, and adapter sequences were removed from both metagenomic
-and metatranscriptomic datasets using **Trimmomatic v0.33** with the following parameters:
+Tool: Trimmomatic v0.33
+Applied to: Metagenomic and metatranscriptomic paired-end reads
 
-- `LEADING:3`
-- `TRAILING:3`
-- `SLIDINGWINDOW:4:15`
+java -jar trimmomatic-0.33.jar PE \
+  -trimlog trimmomatic_log_file.txt \
+  input_forward_read.fastq.gz input_reverse_read.fastq.gz \
+  output_forward_paired.fq.gz output_forward_unpaired.fq.gz \
+  output_reverse_paired.fq.gz output_reverse_unpaired.fq.gz \
+  ILLUMINACLIP:TruSeq3-PE-modified.fa:2:30:10 \
+  LEADING:3 \
+  TRAILING:3 \
+  SLIDINGWINDOW:4:15 \
+  MINLEN:36
 
----
 
-## Contaminant identification and removal
+Parameters:
 
-To identify contaminant sequences, metagenome reads from an artificial ice core
-and a negative extraction control were co-assembled using **MEGAHIT v1.2.9**
-with the `--meta-sensitive` setting.
+Adapter removal: ILLUMINACLIP
 
-This co-assembly was used to construct a contaminant reference database with
-**DeconSeq v0.4.3**. DeconSeq was then used to remove contaminating sequences from
-both glacier metagenomes and metatranscriptomes by filtering reads that mapped to
-the negative control co-assembly.
+Quality trimming: LEADING:3, TRAILING:3
 
----
+Sliding window trimming: SLIDINGWINDOW:4:15
 
-## Metagenome assembly and taxonomic classification
+Minimum read length: MINLEN:36
 
-Decontaminated metagenome reads were taxonomically classified using **Kaiju v1.9**
-via the **KBase** platform.
+2. Co-Assembly of Negative Controls
 
-Metagenome assembly was performed using **MEGAHIT v1.2.9**.
+Tool: MEGAHIT v1.2.9
 
----
+Negative control reads were co-assembled to generate a contaminant reference.
 
-## Genome binning and refinement
+megahit \
+  -1 output_forward_neg_sampl_1_paired.fq,output_forward_neg_sampl_2_paired.fq \
+  -2 output_reverse_neg_sampl_1_paired.fq,output_reverse_neg_sampl_2_paired.fq \
+  -o /output/folder
 
-Metagenome-assembled genomes (MAGs) were recovered using a combination of:
+3. Contaminant Database Construction and Read Removal
 
-- **MetaBAT2 v2.15**
-- **MaxBin2 v2.2.7**
-- **SemiBin2 v1.5.1**
+Tool: DeconSeq
 
-Resulting bins were dereplicated using **dRep v3.4.3**.
-In situ replication rates of microbial populations represented by each MAG were
-estimated using **iRep v1.10**.
+3.1 Create contaminant database
+perl deconseq.pl \
+  -f coassembled_negative_controls.fq \
+  -dbs decontam_database
 
----
+3.2 Remove contaminant reads
+perl deconseq.pl \
+  -f output_forward_paired.fq \
+  -dbs decontam_database \
+  -c 95 \
+  -out_dir /output_directory
 
-## Metatranscriptome processing and read mapping
+perl deconseq.pl \
+  -f output_reverse_paired.fq \
+  -dbs decontam_database \
+  -c 95 \
+  -out_dir /output_directory
 
-Ribosomal RNA sequences were removed from metatranscriptomic reads using
-**SortMeRNA v4.3.6**.
 
-Potential human DNA contamination was removed using the `removehuman` tool
-from the **BBMap v38.92** package.
+Parameter:
 
-Filtered metatranscriptomic reads were aligned to the assembled metagenomes using
-**Bowtie2 v2.5.1**, and transcript counts were generated using **HTSeq v2.0.2**.
+-c 95 — minimum percent identity threshold
 
----
+4. Metagenome Assembly
 
-## Functional and taxonomic annotation
+Tool: MEGAHIT v1.2.9
 
-Functional annotation of assembled metagenomes was performed by uploading assemblies
-to the **JGI IMG/M** annotation pipeline.
+megahit \
+  -1 decontaminated_forward_paired.fq \
+  -2 decontaminated_reverse_paired.fq \
+  -o /output/folder
 
----
+5. Read Mapping to Assembly
+5.1 Build Bowtie2 Index
 
-## Software summary
+Tool: Bowtie2 v2.5.1
 
-| Tool | Version | Purpose |
-|-----|--------|--------|
-| Trimmomatic | 0.33 | Read trimming and QC |
-| MEGAHIT | 1.2.9 | Metagenome assembly |
-| DeconSeq | 0.4.3 | Contaminant removal |
-| Kaiju | 1.9 | Taxonomic classification |
-| MetaBAT2 | 2.15 | Genome binning |
-| MaxBin2 | 2.2.7 | Genome binning |
-| SemiBin2 | 1.5.1 | Genome binning |
-| dRep | 3.4.3 | MAG dereplication |
-| iRep | 1.10 | Replication rate estimation |
-| SortMeRNA | 4.3.6 | rRNA removal |
-| BBMap (removehuman) | 38.92 | Host contamination removal |
-| Bowtie2 | 2.5.1 | Read alignment |
-| HTSeq | 2.0.2 | Read counting |
+bowtie2-build input_assembly.fa output_assembly_index_metagenome
 
----
+5.2 Align Reads
+bowtie2 \
+  -x input_assembly_index_metagenome \
+  -1 input_decontaminated_forward_reads.fq \
+  -2 input_decontaminated_reverse_reads.fq \
+  -S output_assembly_mapped.sam \
+  --very-sensitive-local \
+  --threads 60
 
-## Notes
+5.3 Convert and Sort Alignments
+
+Tool: samtools v1.16.1
+
+samtools view -bS output_assembly_mapped.sam > output_assembly_mapped.bam
+samtools sort output_assembly_mapped.bam -o output_assembly_mapped_sorted.bam
+
+
+The sorted BAM file was used for genome binning.
+
+6. Genome Binning
+
+Three independent binning approaches were used.
+
+6.1 MetaBAT2 (v2.15)
+runMetaBat.sh \
+  -m 2500 \
+  assembly_contigs.fa \
+  output_assembly_mapped_sorted.bam
+
+
+Minimum contig length: 2500 bp.
+
+6.2 MaxBin2 (v2.2.7)
+perl /path/to/MaxBin-2.2.7/run_MaxBin.pl \
+  -contig assembly_contigs.fa \
+  -reads decontaminated_forward_paired.fq \
+  -reads2 decontaminated_reverse_paired.fq \
+  -out output_prefix \
+  -thread 56
+
+6.3 SemiBin2 (v1.5.1)
+SemiBin2 single_easy_bin \
+  --input-fasta assembly_contigs.fa \
+  --input-bam output_assembly_mapped_sorted.bam \
+  --environment global \
+  --output output_prefix
+
+7. MAG Quality Assessment
+
+Tool: CheckM2 v1.0.0
+
+checkm2 predict \
+  -x fa \
+  --input /path/to/input/bins \
+  --output-directory /path/to/output/directory
+
+8. Taxonomic Classification
+
+Tool: GTDB-Tk v2.2.4
+
+gtdbtk classify_wf \
+  -x fa \
+  --genome_dir /path/to/input/bins \
+  --out_dir /path/to/output/directory
+
+9. Dereplication
+
+Tool: dRep v3.4.3
+
+External completeness and contamination estimates generated with CheckM2
+were supplied to dRep using the --genomeInfo flag.
+
+dRep dereplicate /path/to/output/directory \
+  -g /path/to/bins/*.fa \
+  --genomeInfo checkM2_results.csv \
+  --processors 56
+
+10. In Situ Replication Rate Estimation
+
+Tool: iRep v1.10
+
+Bins used for iRep met the following criteria:
+
+75% completeness
+
+<2% contamination
+
+<175 scaffolds per Mbp
+
+10.1 Build Index
+bowtie2-build input_bin.fa output_index_bin
+
+10.2 Map Reads
+bowtie2 \
+  -x output_index_bin \
+  -1 input_decontaminated_forward_reads.fq \
+  -2 input_decontaminated_reverse_reads.fq \
+  -S output_bin_mapped.sam \
+  --very-sensitive-local \
+  --threads 60
+
+10.3 Run iRep
+iRep \
+  -f input_bin.fa \
+  -s output_bin_mapped.sam \
+  -o iRep_bin.iRep
+
+Software Summary
+Tool	Version	Purpose
+Trimmomatic	0.33	Read trimming
+MEGAHIT	1.2.9	Assembly
+DeconSeq	—	Contaminant removal
+Bowtie2	2.5.1	Read alignment
+samtools	1.16.1	BAM processing
+MetaBAT2	2.15	Genome binning
+MaxBin2	2.2.7	Genome binning
+SemiBin2	1.5.1	Genome binning
+CheckM2	1.0.0	MAG QC
+GTDB-Tk	2.2.4	Taxonomy
+dRep	3.4.3	Dereplication
+iRep	1.10	Replication rate
+Reproducibility Statement
+
+This repository documents software, versions, and parameters used in the study and is intended to support transparency and computational reproducibility. It is not intended to serve as a fully automated pipeline.
 
 - Exact command-line arguments are documented in the `/scripts` directory.
 - This repository is intended for transparency and reproducibility rather than

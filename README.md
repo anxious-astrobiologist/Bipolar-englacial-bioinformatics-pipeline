@@ -211,24 +211,97 @@ iRep \
   -s output_bin_mapped.sam \
   -o iRep_bin.iRep
 
+11. Metatranscriptome Processing
+11.1 Remove rRNA (SortMeRNA v4.3.6; DB v4.3)
+sortmerna \
+  --ref /path/to/database/smr_v4.3_default_db.fasta \
+  --ref /path/to/database/smr_v4.3_fast_db.fasta \
+  --ref /path/to/database/smr_v4.3_sensitive_db.fasta \
+  --ref /path/to/database/smr_v4.3_sensitive_db_rfam_seeds.fasta \
+  --reads /path/to/forward/trimmed/RNA/reads.fq.gz \
+  --reads /path/to/reverse/trimmed/RNA/reads.fq.gz
+
+11.2 Remove Human Sequences
+
+BBMap v38.92 (removehuman)
+
+./bbmap.sh \
+  minid=0.95 maxindel=3 bwr=0.16 bw=12 quickmatch fast minhits=2 \
+  path=/path/to/removehuman-database/ qtrim=rl trimq=10 untrim -Xmx23g \
+  in1=/path/to/mRNA/forward/reads.fq.gz \
+  in2=/path/to/mRNA/reverse/reads.fq.gz \
+  outu1=/path/to/forward/output/reads.fq.gz \
+  outu2=/path/to/reverse/output/reads.fq.gz
+
+12. Metatranscriptome Alignment and Gene Counting
+12.1 Align Clean mRNA Reads
+bowtie2-build input_contigs.fa output_index_contigs
+
+bowtie2 \
+  -x output_index_contigs \
+  -1 /path/to/clean_forward_mRNA_reads.fq \
+  -2 /path/to/clean_reverse_mRNA_reads.fq \
+  -S output_mRNA_mapped.sam \
+  --very-sensitive-local \
+  --threads 60
+
+12.2 GFF Identifier Reconciliation
+
+Because JGI annotation replaces original contig identifiers, contig names were reconciled in R using the provided mapping file:
+
+library(dplyr)
+
+joined4 <- left_join(IC_MG_3_ga0599128_functional_annotation,
+                     IC_MG_3_Ga0599128_contig_names_mapping,
+                     by=c("V1" = "V2"))
+
+joined4$V1 <- joined4$V1.y
+joined5 <- joined4[,c(1:9)]
+
+write.table(joined5,
+            file="IC_MG_3_functional_annotation.gff",
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE,
+            col.names=FALSE)
+
+
+Remove stray apostrophes:
+
+sed -i "s/''//g" IC_MG_3_functional_annotation.gff
+
+12.3 Sort Alignment File
+samtools sort -o output_mRNA_mapped-sorted.sam output_mRNA_mapped.sam
+
+12.4 Count Reads per Gene (HTSeq v2.0.2)
+python -m HTSeq.scripts.count \
+  -s no \
+  -t CDS \
+  -i ID \
+  --nonunique=all \
+  -r pos \
+  -a 0 \
+  /path/to/output_mRNA_mapped-sorted.sam \
+  /path/to/IC_MG_3_functional_annotation.gff \
+  > output_mRNA_counts.txt
+
 Software Summary
 Tool	Version	Purpose
 Trimmomatic	0.33	Read trimming
 MEGAHIT	1.2.9	Assembly
 DeconSeq	—	Contaminant removal
-Bowtie2	2.5.1	Read alignment
+Bowtie2	2.5.1	Alignment
 samtools	1.16.1	BAM processing
-MetaBAT2	2.15	Genome binning
-MaxBin2	2.2.7	Genome binning
-SemiBin2	1.5.1	Genome binning
+MetaBAT2	2.15	Binning
+MaxBin2	2.2.7	Binning
+SemiBin2	1.5.1	Binning
 CheckM2	1.0.0	MAG QC
 GTDB-Tk	2.2.4	Taxonomy
 dRep	3.4.3	Dereplication
 iRep	1.10	Replication rate
+SortMeRNA	4.3.6	rRNA removal
+BBMap	38.92	Human sequence removal
+HTSeq	2.0.2	Gene counting
 Reproducibility Statement
 
-This repository documents software, versions, and parameters used in the study and is intended to support transparency and computational reproducibility. It is not intended to serve as a fully automated pipeline.
-
-- Exact command-line arguments are documented in the `/scripts` directory.
-- This repository is intended for transparency and reproducibility rather than
-  full pipeline automation.
+This repository documents the analytical workflow, software versions, and parameters used in the study to support transparency and computational reproducibility. It is not intended to serve as a fully automated pipeline.

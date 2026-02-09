@@ -80,3 +80,57 @@ bowtie2 -x output_index_bin -1 input_decontaminated_forward_reads.fq \
 
 #iRep v.1.10#
 iRep -f input_bin.fa -s output_bin_mapped.sam -o iRep_bin.iRep
+
+####################################################################################################################
+#Remove contaminating rRNA and human sequences from metatranscriptome#
+#Remove rRNA from mRNA reads#
+#SortMeRNA v.4.3.6 Database v.4.3#
+sortmerna --ref /path/to/database/smr_v4.3_default_db.fasta \
+--ref /path/to/database/smr_v4.3_fast_db.fasta \
+--ref /path/to/database/smr_v4.3_sensitive_db.fasta \
+--ref /path/to/database/smr_v4.3_sensitive_db_rfam_seeds.fasta \
+--reads /path/to/forward/trimmed/RNA/reads/reads.fq.gz --reads /path/to/reverse/trimmed/RNA/reads/reads.fq.gz
+
+#Remove human sequences from metatranscriptome#
+#removehuman - part of BBMap v.38.92#
+./bbmap.sh minid=0.95 maxindel=3 bwr=0.16 bw=12 quickmatch fast minhits=2 \
+path=/path/to/removehuman-database/ qtrim=rl trimq=10 untrim -Xmx23g \
+in1=/path/to/mRNA/forward/reads/reads.fq.gz in2=/path/to/mRNA/reverse/reads/reads.fq.gz \
+outu1=/path/to/forward/output/reads.fq.gz outu2=/path/to/reverse/output/reads.fq.gz
+
+####################################################################################################################
+#Align the clean mRNA reads to the metagenome and count the hits to each gene#
+#Align the clean mRNA reads to the metagenome#
+#Bowtie2 v.2.5.1#
+#build index of metagenome first
+bowtie2-build input_contigs.fa output_index_contigs
+#last bit is setting the first part of the file name the program will use for all the files
+
+#Next actually align the metatranscriptome reads to the indexed metagenome
+bowtie2 -x output_index_contigs -1 /path/to/clean_forward_mRNA_reads.fq \
+-2 /path/to/clean_reverse_mRNA_reads.fq -S output_mRNA_mapped.sam \
+--very-sensitive-local --threads 60
+
+#Next, need to use HTSeq to count the reads mapping to each gene. Need a .gff file which came from my JGI annotation.
+#The contig names in the .gff file do not match the ones in my contigs file because when JGI annotates metagenomes they
+#swap in their own identifiers. So, the first step was to use the contig mapping file obtained from JGI to swap the names.
+#This was done in R.
+
+> library(dplyr)
+> joined4 <- left_join(IC_MG_3_ga0599128_functional_annotation, IC_MG_3_Ga0599128_contig_names_mapping, by=c("V1" = "V2"))
+> joined4$V1 <- joined4$V1.y
+> joined5<-joined4[,c(1:9)]
+> write.table(joined5, file="IC_MG_3_functional_annotation.gff", sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+#Getting rid of apostrophes in gff file
+$ sed -i "s/''//g" IC_MG_3_functional_annotation.gff
+
+#Sorting sam file with samtools
+#samtools v1.16.1#
+$ samtools sort -o output_mRNA_mapped-sorted.sam output_mRNA_mapped.sam
+
+#Using HTSeq v.2.0.2#
+python -m HTSeq.scripts.count -s no -t CDS -i ID --nonunique=all -r pos -a 0 \
+/path/to/output_mRNA_mapped-sorted.sam /path/to/IC_MG_3_functional_annotation.gff > output_mRNA_counts.txt
+
+###################################################################################################################

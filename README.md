@@ -4,7 +4,9 @@ This repository documents the bioinformatic tools, versions, and command-line ar
 ---
 
 No raw sequencing data are hosted in this repository. This repository serves as
-a transparent record of the analytical workflow and software configuration.
+a transparent record of the analytical workflow and software configuration. The
+raw data used in this workflow along with MAG sequences was deposited to NCBI
+under BioProject accession number PRJNA1335554.
 
 ---
 
@@ -20,6 +22,9 @@ The bioinformatic pipeline consisted of the following major steps:
 6. Functional and taxonomic annotation
 
 The majority of tools were installed in a Conda environment.
+R scripts used to construct figures for this manuscript are also
+located within this repository and were implemented using R v4.4.2
+and R Studio v2024.12.0+467.
 
 ---
 
@@ -36,6 +41,12 @@ ILLUMINACLIP:TruSeq3-PE-modified.fa:2:30:10 \
 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
 ```
 ### 2. Decontamination
+
+Decontamination of the sample sequences was performed by co-assembling the negative
+control reads into contigs and then aligning the sample reads to the assembled
+negative control sequences. Any sample reads which aligned to the negative control
+assembly were removed.
+
 #### 2.1 Co-assembly of Negative Controls
 
 Tool: MegaHit v1.2.9
@@ -58,28 +69,34 @@ perl deconseq.pl -f output_reverse_paired.fq -dbs decontam_database -c 95 -out_d
 
 -c 95 = 95% identity cutoff for contaminant matches
 
-Taxonomic classification of the decontaminated reads was performed using Kaiju v1.9 through the KBase platform.
+### 3. Taxonomic Classification of Sequencing Reads
 
-### 3. Metagenome Assembly & Annotation
-#### 3.1 Metagenome Assembly
+Taxonomic classification of the decontaminated metagenome reads was performed using Kaiju v1.9 through the KBase platform.
+
+### 4. Metagenome Assembly & Annotation
+#### 4.1 Metagenome Assembly
 Tool: MegaHit v1.2.9
 ```
 megahit -1 decontaminated_forward_paired.fq \
 -2 decontaminated_reverse_paired.fq \
 -o /output/folder
 ```
-#### 3.2 Metagenome Functional Annotation
+#### 4.2 Metagenome Functional Annotation
 
 Metagenomes were annotated using the JGI IMG/M pipeline.
+The annotation of both metagenomes can be found on JGI's
+Gold (Genomes Online Database) website under the accession
+number Gs0161447.
 
-### 4. Read Mapping to Assembly
-#### 4.1 Build Bowtie2 Index
+
+### 5. Read Mapping to Assembly
+#### 5.1 Build Bowtie2 Index
 
 Tool: Bowtie2 v2.5.1
 ```
 bowtie2-build input_assembly.fa output_assembly_index
 ```
-#### 4.2 Align Reads
+#### 5.2 Align Reads
 ```
 bowtie2 -x output_assembly_index \
 -1 input_decontaminated_forward_reads.fq \
@@ -87,14 +104,14 @@ bowtie2 -x output_assembly_index \
 -S output_assembly_mapped.sam \
 --very-sensitive-local --threads 60
 ```
-#### 4.3 Convert and Sort
+#### 5.3 Convert and Sort
 
 Tool: samtools v1.16.1
 ```
 samtools view -bS output_assembly_mapped.sam > output_assembly_mapped.bam
 samtools sort output_assembly_mapped.bam -o output_assembly_mapped_sorted.bam
 ```
-### 5. Genome Binning
+### 6. Genome Binning
 MetaBat2 v2.15
 ```
 runMetaBat.sh -m 2500 assembly_contigs.fa output_assembly_mapped_sorted.bam
@@ -113,7 +130,7 @@ SemiBin2 single_easy_bin --input-fasta assembly_contigs.fa \
 --environment global \
 --output output_prefix
 ```
-### 6. Bin Quality Assessment
+### 7. Bin Quality Assessment
 
 Tool: CheckM2 v1.0.0
 ```
@@ -121,7 +138,7 @@ checkm2 predict -x fa \
 --input /path/to/input/bins \
 --output-directory /path/to/output/directory
 ```
-### 7. Bin Taxonomic Classification
+### 8. Bin Taxonomic Classification
 
 Tool: GTDB-Tk v2.2.4
 ```
@@ -129,7 +146,7 @@ gtdbtk classify_wf -x fa \
 --genome_dir /path/to/input/bins \
 --out_dir /path/to/output/directory
 ```
-### 8. Dereplication
+### 9. Dereplication
 
 Tool: dRep v3.4.3
 
@@ -140,7 +157,12 @@ dRep dereplicate /path/to/output/directory \
 --genomeInfo checkM2_results.csv \
 --processors 56
 ```
-### 9. In Situ Replication Rate
+
+As using dRep raises the possibility some bins share contigs, we wrote a custom
+script to search the fasta headers of all contigs in each bin and report
+instances where a contig was shared between two or more bins.
+
+### 10. In Situ Replication Rate
 
 Tool: iRep v1.10
 
@@ -163,8 +185,8 @@ iRep -f input_bin.fa -s output_bin_mapped.sam -o iRep_bin.iRep
 
 Note: Bins must be >75% complete, <2% contamination, and <175 scaffolds/Mbp.
 
-### 10. Metatranscriptome Processing
-#### 10.1 Remove rRNA
+### 11. Metatranscriptome Processing
+#### 11.1 Remove rRNA
 
 Tool: SortMeRNA v4.3.6
 ```
@@ -176,7 +198,7 @@ sortmerna \
 --reads forward_reads.fq.gz \
 --reads reverse_reads.fq.gz
 ```
-#### 10.2 Remove Human Sequences
+#### 11.2 Remove Human Sequences
 
 Tool: BBMap v38.92 (removehuman)
 ```
@@ -187,8 +209,8 @@ in2=reverse_reads.fq.gz \
 outu1=clean_forward_reads.fq.gz \
 outu2=clean_reverse_reads.fq.gz
 ```
-### 11. Gene Expression Quantification
-#### 11.1 Align mRNA to Metagenome
+### 12. Gene Expression Quantification
+#### 12.1 Align mRNA to Metagenome
 ```
 bowtie2-build input_contigs.fa output_index_contigs
 
@@ -198,7 +220,7 @@ bowtie2 -x output_index_contigs \
 -S output_mRNA_mapped.sam \
 --very-sensitive-local --threads 60
 ```
-#### 11.2 Prepare GFF File (R)
+#### 12.2 Prepare GFF File (R)
 
 Contig names were corrected using JGI-provided mapping files in R.
 ```
@@ -220,11 +242,11 @@ Remove apostrophes (from a terminal):
 ```
 sed -i "s/''//g" functional_annotation.gff
 ```
-#### 11.3 Sort Alignment File
+#### 12.3 Sort Alignment File
 ```
 samtools sort -o output_mRNA_mapped-sorted.sam output_mRNA_mapped.sam
 ```
-#### 11.4 Count Reads Per Gene
+#### 12.4 Count Reads Per Gene
 
 Tool: HTSeq v2.0.2
 ```
